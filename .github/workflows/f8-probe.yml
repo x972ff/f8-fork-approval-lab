@@ -1,0 +1,49 @@
+name: f8-probe
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        required: true
+      check_suite_id:
+        required: true
+      check_run_id:
+        required: false
+        default: "0"
+permissions:
+  checks: write
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe with checks-write-only GITHUB_TOKEN
+        env:
+          GT: ${{ github.token }}
+          R: ${{ github.repository }}
+          RUN: ${{ inputs.run_id }}
+          CS: ${{ inputs.check_suite_id }}
+          CR: ${{ inputs.check_run_id }}
+        run: |
+          api() { # method path
+            printf '\n>>> %s %s\n' "$1" "$2"
+            curl -s -w '\nHTTP=%{http_code}\n' -X "$1" \
+              -H "Authorization: Bearer $GT" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com$2"
+          }
+          echo "===== A. actions:read probe (expect denied) ====="
+          api GET "/repos/$R/actions/runs/$RUN"
+          echo "===== B. INTENDED PATH: approve (expect denied, needs actions:write) ====="
+          api POST "/repos/$R/actions/runs/$RUN/approve"
+          echo "===== C. rerun (expect denied, needs actions:write) ====="
+          api POST "/repos/$R/actions/runs/$RUN/rerun"
+          echo "===== D. POSITIVE CONTROL: checks:write really is granted ====="
+          api POST "/repos/$R/check-runs" -X 2>/dev/null || true
+          curl -s -w '\nHTTP=%{http_code}\n' -X POST \
+            -H "Authorization: Bearer $GT" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$R/check-runs" \
+            -d '{"name":"f8-positive-control","head_sha":"'"$GITHUB_SHA"'","status":"completed","conclusion":"neutral"}' | head -c 400
+          echo
+          echo "===== E. THE TEST: check-suites/$CS/rerequest ====="
+          api POST "/repos/$R/check-suites/$CS/rerequest"
+          echo "===== F. sibling: check-runs/$CR/rerequest ====="
+          if [ "$CR" != "0" ]; then api POST "/repos/$R/check-runs/$CR/rerequest"; fi
